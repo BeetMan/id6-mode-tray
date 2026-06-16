@@ -24,7 +24,25 @@ ID6 Mode Tray 是一个轻量的 Windows 托盘模式切换器，用来快速切
 - 智控中心的 `GCUBridge` MQTT 服务正在本机运行
 - .NET 8 Windows Desktop Runtime，或使用自包含发布包
 
+智控中心可从机械师官方驱动下载页获取：
+
+```text
+https://www.machenike.com/driver/download/?id=344
+```
+
 程序默认连接本机 `127.0.0.1:13688`，并向 `Fan/Control` topic 发布控制消息。它不会直接写入固件，也不安装驱动。
+
+## 开发基准版本
+
+当前实现基于本机安装的智控中心进行观察和验证：
+
+- UI 包：`CCU.WinUI`
+- 包版本：`5.60.60.17`
+- 架构：`x64`
+- 主程序：`CCUWinUI.exe`
+- 发布者显示名：`AISTONE GLOBAL (SUZHOU)`
+
+不同版本的智控中心可能调整 MQTT 端口、topic、client 信息、动作名称或配置文件结构，因此其他版本需要重新验证。
 
 ## 测试设备
 
@@ -112,11 +130,13 @@ dotnet build ModeTray\ModeTray.csproj -c Release
 </Reference>
 ```
 
-这个 DLL 没有提交到仓库。发布公开版本前，应改成可审计、可再现的依赖方式，例如：
+这个 DLL 未随仓库发布。开发时使用的版本来自本机已安装的原始智控中心软件副本：
 
-- 使用有明确许可证的 NuGet 包
-- 将依赖源码作为合法子模块或第三方目录引入
-- 在 release 说明中明确二进制来源和许可证
+- 文件名：`M2Mqtt.Net.dll`
+- 程序集版本：`4.3.0.0`
+- SHA1：`690768514CED67987494CA8F6C450AD689BCB68F`
+
+如需本地构建，请先从机械师官方驱动下载页安装对应智控中心，再从你合法安装的智控中心原始文件中自行提取，并放置到 `ModeTray\lib\M2Mqtt.Net.dll`。请不要将该 DLL 提交到仓库或二次分发。
 
 ## 图标
 
@@ -148,7 +168,7 @@ ID6ModeTray.log
 - 当前 MQTT 地址、topic、client id、用户名和密码来自本机观察结果，可能随智控中心版本变化
 - GPU OC 开关目前固定为 `+150 MHz` 和 `0 MHz`
 - 目前没有安装器，也没有自动部署运行时
-- 仓库暂不包含第三方 MQTT DLL，因此干净 clone 后需要先补齐依赖或调整项目引用
+- 仓库暂不包含 `M2Mqtt.Net.dll`，因此干净 clone 后需要先从本机合法安装的智控中心原始文件中提取该依赖，或自行调整项目引用
 
 ## 发布和风险边界
 
