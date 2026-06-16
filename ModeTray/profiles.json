@@ -1,0 +1,54 @@
+[
+  {
+    "label": "办公模式",
+    "action": "OPERATING_OFFICE_MODE",
+    "operatingMode": 0,
+    "profileIndex": 0
+  },
+  {
+    "label": "游戏模式",
+    "action": "OPERATING_GAMING_MODE",
+    "operatingMode": 1,
+    "profileIndex": 0
+  },
+  {
+    "label": "狂暴 · 静技",
+    "action": "OPERATING_TURBO_MODE",
+    "operatingMode": 2,
+    "profileIndex": 0,
+    "silent": 1,
+    "extreme": 0
+  },
+  {
+    "label": "狂暴 · 极速",
+    "action": "OPERATING_TURBO_MODE",
+    "operatingMode": 2,
+    "profileIndex": 0,
+    "silent": 0,
+    "extreme": 1
+  },
+  {
+    "label": "Profile 1 - 静音高性能",
+    "action": "OPERATING_CUSTOM_MODE",
+    "operatingMode": 3,
+    "profileIndex": 0
+  },
+  {
+    "label": "Profile 2 - 静音办公",
+    "action": "OPERATING_CUSTOM_MODE",
+    "operatingMode": 3,
+    "profileIndex": 1
+  },
+  {
+    "label": "Profile 3 - 静音游戏",
+    "action": "OPERATING_CUSTOM_MODE",
+    "operatingMode": 3,
+    "profileIndex": 2
+  },
+  {
+    "label": "Profile 4",
+    "action": "OPERATING_CUSTOM_MODE",
+    "operatingMode": 3,
+    "profileIndex": 3
+  }
+]
