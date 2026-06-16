@@ -4,7 +4,7 @@ ID6 Mode Tray 是一个轻量的 Windows 托盘模式切换器，用来快速切
 
 它不是智控中心的替代品，而是一个更顺手的小托盘入口：保留原厂智控中心和 `GCUBridge` 服务负责真正的设备控制，Mode Tray 只向本机服务发送已观察到的 MQTT 控制命令，并读取智控中心现有配置文件来显示当前状态。
 
-![ID6 Mode Tray screenshot](assets/screenshot.jpg)
+![ID6 Mode Tray screenshot](ModeTray/assets/screenshot.jpg)
 
 ## 当前功能
 
