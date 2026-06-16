@@ -1,0 +1,47 @@
+# This workspace contains local OEM analysis dumps, extracted binaries, build
+# outputs, and experiments. Publish ID6 Mode Tray with an explicit allow-list
+# so those files cannot be staged accidentally.
+*
+
+!.gitignore
+!ModeTray/
+!ModeTray/README.md
+!ModeTray/ModeTray.csproj
+!ModeTray/NuGet.Config
+!ModeTray/Program.cs
+!ModeTray/app.manifest
+!ModeTray/profiles.json
+!ModeTray/assets/
+!ModeTray/assets/id6-mode-icon.svg
+!ModeTray/assets/id6-mode.ico
+!ModeTray/scripts/
+!ModeTray/scripts/generate-icon.ps1
+
+# Temporary local snapshots of installed binaries.
+/CCU.WinUI-installed-copy/
+/*-installed-copy/
+/backups/
+
+# Build outputs and logs.
+bin/
+obj/
+publish/
+**/bin/
+**/obj/
+**/publish/
+*.log
+
+# Do not publish extracted/repacked binaries, drivers, certs, or decompiler
+# products unless they are explicitly reviewed and licensed for redistribution.
+*.dll
+*.exe
+*.pdb
+*.sys
+*.cat
+*.cer
+*.lib
+*.exp
+*.resources
+*.compressed
+*.il
+*.res
