@@ -22,7 +22,7 @@ ID6 Mode Tray 是一个轻量的 Windows 托盘模式切换器，用来快速切
 - Windows
 - 已安装并可正常运行的智控中心
 - 智控中心的 `GCUBridge` MQTT 服务正在本机运行
-- .NET 8 Windows Desktop Runtime，或使用自包含发布包
+- .NET 10 Windows Desktop Runtime（Windows 11 26H2 及更新版本请使用 .NET 10 构建；旧 .NET 8 构建在新版任务栏上无法注册托盘图标）
 
 智控中心可从机械师官方驱动下载页获取：
 
