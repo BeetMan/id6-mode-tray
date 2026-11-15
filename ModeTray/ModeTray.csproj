@@ -13,6 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ModeTray.Tests" />
     <Reference Include="M2Mqtt.Net">
       <HintPath>lib\M2Mqtt.Net.dll</HintPath>
       <Private>true</Private>

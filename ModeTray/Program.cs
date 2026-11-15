@@ -111,10 +111,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ModePopup popup;
     private readonly ModeToast toast;
     private readonly System.Windows.Forms.Timer refreshTimer;
+    private readonly ModeCatalog modeCatalog;
+    private bool operationInProgress;
+    private ModeStateError? lastStateError;
 
     public TrayApplicationContext()
     {
-        popup = new ModePopup(SwitchMode, SetTurboOc, SetFanBoost, ExitThread);
+        modeCatalog = new ModeCatalog();
+        popup = new ModePopup(modeCatalog.Modes, SwitchMode, SetTurboOc, SetFanBoost, Refresh, ExitThread);
         toast = new ModeToast();
         notifyIcon = new NotifyIcon
         {
@@ -145,78 +149,98 @@ internal sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        RefreshState();
+        Refresh();
         popup.ShowNearTray();
+    }
+
+    private void Refresh()
+    {
+        if (modeCatalog.Refresh())
+        {
+            popup.SetModes(modeCatalog.Modes);
+        }
+
+        RefreshState();
     }
 
     private void SwitchMode(ModeDefinition mode)
     {
-        popup.SetBusy(true);
-        try
-        {
-            ModeSwitcher.Switch(mode);
-            RefreshState();
-            toast.ShowMessage("\u6a21\u5f0f\u5df2\u5207\u6362", mode.Label, false);
-        }
-        catch (Exception ex)
-        {
-            toast.ShowMessage("\u5207\u6362\u5931\u8d25", ex.Message, true);
-        }
-        finally
-        {
-            popup.SetBusy(false);
-        }
+        _ = RunOperationAsync(
+            () => ModeSwitcher.Switch(mode),
+            "\u6a21\u5f0f\u5df2\u5207\u6362",
+            mode.Label,
+            "\u5207\u6362\u5931\u8d25");
     }
 
     private void SetTurboOc(bool enabled)
     {
-        popup.SetBusy(true);
-        try
-        {
-            ModeSwitcher.SetTurboOc(enabled);
-            RefreshState();
-            toast.ShowMessage(
-                enabled ? "GPU OC 已开启" : "GPU OC 已关闭",
-                enabled ? "核心频率偏移 +150 MHz" : "核心频率偏移已恢复为 0",
-                false);
-        }
-        catch (Exception ex)
-        {
-            toast.ShowMessage("GPU OC 切换失败", ex.Message, true);
-        }
-        finally
-        {
-            popup.SetBusy(false);
-        }
+        _ = RunOperationAsync(
+            () => ModeSwitcher.SetTurboOc(enabled),
+            enabled ? "GPU OC 已开启" : "GPU OC 已关闭",
+            enabled ? "核心频率偏移 +150 MHz" : "核心频率偏移已恢复为 0",
+            "GPU OC 切换失败");
     }
 
     private void SetFanBoost(bool enabled)
     {
+        _ = RunOperationAsync(
+            () => ModeSwitcher.SetFanBoost(enabled),
+            enabled ? "一键强冷已开启" : "一键强冷已关闭",
+            enabled ? "CPU 与 GPU 风扇已进入强冷状态" : "风扇已恢复当前模式控制",
+            "一键强冷切换失败");
+    }
+
+    private async Task RunOperationAsync(
+        Action operation,
+        string successTitle,
+        string successMessage,
+        string failureTitle)
+    {
+        if (operationInProgress)
+        {
+            return;
+        }
+
+        operationInProgress = true;
         popup.SetBusy(true);
         try
         {
-            ModeSwitcher.SetFanBoost(enabled);
+            await Task.Run(operation);
             RefreshState();
-            toast.ShowMessage(
-                enabled ? "一键强冷已开启" : "一键强冷已关闭",
-                enabled ? "CPU 与 GPU 风扇已进入强冷状态" : "风扇已恢复当前模式控制",
-                false);
+            toast.ShowMessage(successTitle, successMessage, false);
         }
         catch (Exception ex)
         {
-            toast.ShowMessage("一键强冷切换失败", ex.Message, true);
+            toast.ShowMessage(failureTitle, ex.Message, true);
         }
         finally
         {
+            operationInProgress = false;
             popup.SetBusy(false);
+            RefreshState();
         }
     }
 
     private void RefreshState()
     {
-        var state = ModeState.TryRead();
-        popup.UpdateState(state);
-        var active = ModeDefinition.Load().FirstOrDefault(mode => state is not null && mode.Matches(state.Value));
+        var read = ModeState.Read();
+        popup.UpdateState(read.State, read.Error, operationInProgress);
+        if (!Equals(lastStateError, read.Error))
+        {
+            if (read.Error is not null)
+            {
+                DiagnosticLog.Write($"Mode state read failed ({read.Error.Kind}): {read.Error.Detail}");
+            }
+            else if (lastStateError is not null)
+            {
+                DiagnosticLog.Write("Mode state recovered.");
+            }
+
+            lastStateError = read.Error;
+        }
+
+        var active = modeCatalog.Modes.FirstOrDefault(
+            mode => read.State is not null && mode.Matches(read.State.Value));
         notifyIcon.Text = active is null ? "ID6 Mode Tray" : $"ID6 - {active.Label}";
     }
 
@@ -231,6 +255,88 @@ internal sealed class TrayApplicationContext : ApplicationContext
         notifyIcon.Dispose();
         base.ExitThreadCore();
     }
+}
+
+internal static class PopupPlacement
+{
+    internal static Point Calculate(
+        Rectangle monitorBounds,
+        Rectangle workingArea,
+        Size popupSize,
+        Point cursor,
+        int margin = 8)
+    {
+        int x;
+        int y;
+        if (workingArea.Top > monitorBounds.Top)
+        {
+            x = cursor.X - popupSize.Width + margin * 3;
+            y = workingArea.Top + margin;
+        }
+        else if (workingArea.Bottom < monitorBounds.Bottom)
+        {
+            x = cursor.X - popupSize.Width + margin * 3;
+            y = workingArea.Bottom - popupSize.Height - margin;
+        }
+        else if (workingArea.Left > monitorBounds.Left)
+        {
+            x = workingArea.Left + margin;
+            y = cursor.Y - popupSize.Height + margin * 3;
+        }
+        else if (workingArea.Right < monitorBounds.Right)
+        {
+            x = workingArea.Right - popupSize.Width - margin;
+            y = cursor.Y - popupSize.Height + margin * 3;
+        }
+        else
+        {
+            x = cursor.X - popupSize.Width + margin * 3;
+            y = workingArea.Bottom - popupSize.Height - margin;
+        }
+
+        return Clamp(workingArea, popupSize, x, y, margin);
+    }
+
+    internal static Point BottomRight(Rectangle workingArea, Size size, int margin = 18) =>
+        Clamp(
+            workingArea,
+            size,
+            workingArea.Right - size.Width - margin,
+            workingArea.Bottom - size.Height - margin,
+            margin);
+
+    internal static int FitHeight(int desiredHeight, int workingAreaHeight, int margin) =>
+        Math.Max(1, Math.Min(desiredHeight, workingAreaHeight - margin));
+
+    internal static int FitWidth(int desiredWidth, int workingAreaWidth, int margin) =>
+        Math.Max(1, Math.Min(desiredWidth, workingAreaWidth - margin));
+
+    private static Point Clamp(
+        Rectangle workingArea,
+        Size size,
+        int x,
+        int y,
+        int margin)
+    {
+        margin = EffectiveMargin(workingArea, size, margin);
+        var minimumX = workingArea.Left + margin;
+        var minimumY = workingArea.Top + margin;
+        var maximumX = workingArea.Right - size.Width - margin;
+        var maximumY = workingArea.Bottom - size.Height - margin;
+        return new Point(
+            ClampValue(x, minimumX, maximumX),
+            ClampValue(y, minimumY, maximumY));
+    }
+
+    private static int EffectiveMargin(Rectangle workingArea, Size size, int margin)
+    {
+        var horizontal = Math.Max(0, (workingArea.Width - size.Width) / 2);
+        var vertical = Math.Max(0, (workingArea.Height - size.Height) / 2);
+        return Math.Min(margin, Math.Min(horizontal, vertical));
+    }
+
+    private static int ClampValue(int value, int minimum, int maximum) =>
+        maximum < minimum ? minimum : Math.Max(minimum, Math.Min(value, maximum));
 }
 
 internal sealed class ModeToast : Form
@@ -307,6 +413,13 @@ internal sealed class ModeToast : Form
             args.Graphics.DrawPath(border, RoundedRectangle(ClientRectangle, CornerRadius));
         };
         Resize += (_, _) => ApplyRoundedRegion();
+        DpiChanged += (_, _) =>
+        {
+            if (Visible)
+            {
+                MoveToCurrentMonitor();
+            }
+        };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -319,15 +432,20 @@ internal sealed class ModeToast : Form
             ? Color.FromArgb(244, 91, 105)
             : Color.FromArgb(57, 211, 181);
 
-        var workingArea = Screen.PrimaryScreen?.WorkingArea
-            ?? Screen.FromPoint(Cursor.Position).WorkingArea;
-        Location = new Point(
-            workingArea.Right - Width - 18,
-            workingArea.Bottom - Height - 18);
+        MoveToCurrentMonitor();
         ApplyRoundedRegion();
         hideTimer.Stop();
         Show();
+        MoveToCurrentMonitor();
         hideTimer.Start();
+    }
+
+    private void MoveToCurrentMonitor()
+    {
+        Location = PopupPlacement.BottomRight(
+            Screen.FromPoint(Cursor.Position).WorkingArea,
+            Size,
+            LogicalToDeviceUnits(18));
     }
 
     private void ApplyRoundedRegion()
@@ -370,6 +488,7 @@ internal sealed class ModePopup : Form
     private readonly SafeTextLabel statusLabel;
     private readonly Button turboOcButton;
     private readonly Button fanBoostButton;
+    private readonly SafeTextLabel customSectionLabel;
     private readonly Action<ModeDefinition> switchMode;
     private readonly Action<bool> setTurboOc;
     private readonly Action<bool> setFanBoost;
@@ -379,9 +498,11 @@ internal sealed class ModePopup : Form
     private bool fanBoostEnabled;
 
     public ModePopup(
+        IReadOnlyList<ModeDefinition> modes,
         Action<ModeDefinition> switchMode,
         Action<bool> setTurboOc,
         Action<bool> setFanBoost,
+        Action refresh,
         Action exit)
     {
         this.switchMode = switchMode;
@@ -394,6 +515,7 @@ internal sealed class ModePopup : Form
         DoubleBuffered = true;
         Font = new Font(UiFontName, 10F, FontStyle.Regular, GraphicsUnit.Point);
         FormBorderStyle = FormBorderStyle.None;
+        KeyPreview = true;
         MaximizeBox = false;
         MinimizeBox = false;
         Padding = new Padding(14);
@@ -462,7 +584,6 @@ internal sealed class ModePopup : Form
         content.Controls.Add(header);
 
         AddSectionLabel("\u6807\u51c6\u6a21\u5f0f");
-        var modes = ModeDefinition.Load();
         foreach (var mode in modes.Where(mode => mode.OperatingMode != 3))
         {
             AddMode(mode);
@@ -514,7 +635,7 @@ internal sealed class ModePopup : Form
         };
         content.Controls.Add(fanBoostButton);
 
-        AddSectionLabel("\u81ea\u5b9a\u4e49\u6a21\u5f0f");
+        customSectionLabel = AddSectionLabel("\u81ea\u5b9a\u4e49\u6a21\u5f0f");
         foreach (var mode in modes.Where(mode => mode.OperatingMode == 3))
         {
             AddMode(mode);
@@ -531,7 +652,7 @@ internal sealed class ModePopup : Form
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24F));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 41F));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35F));
-        footer.Controls.Add(CreateFooterButton("\u5237\u65b0", (_, _) => UpdateState(ModeState.TryRead())), 0, 0);
+        footer.Controls.Add(CreateFooterButton("\u5237\u65b0", (_, _) => refresh()), 0, 0);
         footer.Controls.Add(CreateFooterButton("\u667a\u63a7\u4e2d\u5fc3", (_, _) => SafeOpenControlCenter()), 1, 0);
         footer.Controls.Add(CreateFooterButton(
             StartupManager.IsEnabled ? "\u5df2\u542f\u7528" : "\u5f00\u673a\u542f\u52a8",
@@ -571,6 +692,14 @@ internal sealed class ModePopup : Form
         Resize += (_, _) => ApplyRoundedRegion();
         content.ClientSizeChanged += (_, _) => UpdateContentWidths();
         Shown += (_, _) => FitToContent();
+        DpiChanged += (_, _) =>
+        {
+            if (Visible)
+            {
+                FitToContent();
+                RepositionNearTray();
+            }
+        };
     }
 
     protected override bool ShowWithoutActivation => false;
@@ -578,15 +707,74 @@ internal sealed class ModePopup : Form
     public void ShowNearTray()
     {
         FitToContent();
-        var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
-        var x = Math.Min(Cursor.Position.X - Width + 24, screen.Right - Width - 8);
-        var y = screen.Bottom - Height - 8;
-        Location = new Point(Math.Max(screen.Left + 8, x), Math.Max(screen.Top + 8, y));
+        RepositionNearTray();
         Show();
         Activate();
+        RepositionNearTray();
+        FocusSelectedMode();
     }
 
-    public void UpdateState(ModeState? state)
+    private void RepositionNearTray()
+    {
+        var cursor = Cursor.Position;
+        var screen = Screen.FromPoint(cursor);
+        Location = PopupPlacement.Calculate(
+            screen.Bounds,
+            screen.WorkingArea,
+            Size,
+            cursor,
+            LogicalToDeviceUnits(8));
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.KeyCode == Keys.Escape)
+        {
+            Hide();
+            e.Handled = true;
+        }
+    }
+
+    private void FocusSelectedMode()
+    {
+        foreach (var (tile, _) in modeTiles)
+        {
+            if (tile.Selected && tile.Enabled)
+            {
+                tile.Focus();
+                return;
+            }
+        }
+
+        if (modeTiles.Count > 0 && modeTiles[0].Tile.Enabled)
+        {
+            modeTiles[0].Tile.Focus();
+        }
+    }
+
+    public void SetModes(IReadOnlyList<ModeDefinition> modes)
+    {
+        foreach (var entry in modeTiles.Where(entry => entry.Mode.OperatingMode == 3).ToArray())
+        {
+            content.Controls.Remove(entry.Tile);
+            modeTiles.Remove(entry);
+            entry.Tile.Dispose();
+        }
+
+        var insertionIndex = content.Controls.IndexOf(customSectionLabel) + 1;
+        foreach (var mode in modes.Where(mode => mode.OperatingMode == 3))
+        {
+            AddMode(mode, insertionIndex++);
+        }
+
+        FitToContent();
+    }
+
+    public void UpdateState(
+        ModeState? state,
+        ModeStateError? error = null,
+        bool preserveStatus = false)
     {
         ModeDefinition? active = null;
         foreach (var (tile, mode) in modeTiles)
@@ -599,9 +787,12 @@ internal sealed class ModePopup : Form
             }
         }
 
-        statusLabel.Text = active is null
-            ? "\u672a\u8bfb\u53d6\u5230\u5f53\u524d\u6a21\u5f0f"
-            : $"\u5f53\u524d\uff1a{active.Label}";
+        if (!preserveStatus)
+        {
+            statusLabel.Text = active is null
+                ? error?.UserMessage ?? "\u672a\u8bfb\u53d6\u5230\u5f53\u524d\u6a21\u5f0f"
+                : $"\u5f53\u524d\uff1a{active.Label}";
+        }
 
         turboModeActive = state?.OperatingMode == 2;
         turboOcEnabled = turboModeActive && state?.TurboGpuOcOffset == 150;
@@ -621,7 +812,6 @@ internal sealed class ModePopup : Form
         UpdateFanBoostButton();
         statusLabel.Text = value ? "\u6b63\u5728\u5207\u6362\u2026" : statusLabel.Text;
         Cursor = value ? Cursors.WaitCursor : Cursors.Default;
-        Application.DoEvents();
     }
 
     private void UpdateTurboOcButton()
@@ -642,7 +832,7 @@ internal sealed class ModePopup : Form
             : "GPU OC +150 MHz  ·  仅狂暴模式";
     }
 
-    private void AddSectionLabel(string text)
+    private SafeTextLabel AddSectionLabel(string text)
     {
         var label = new SafeTextLabel
         {
@@ -654,6 +844,7 @@ internal sealed class ModePopup : Form
         };
         label.Tag = "section";
         content.Controls.Add(label);
+        return label;
     }
 
     private void UpdateFanBoostButton()
@@ -672,10 +863,11 @@ internal sealed class ModePopup : Form
         fanBoostButton.Text = $"一键强冷  ·  {(fanBoostEnabled ? "已开启" : "已关闭")}";
     }
 
-    private void AddMode(ModeDefinition mode)
+    private void AddMode(ModeDefinition mode, int? insertionIndex = null)
     {
         var tile = new ModeTile(mode.Label)
         {
+            Enabled = !busy,
             Margin = new Padding(8, 4, 8, 4),
             Size = new Size(ContentWidth, 64)
         };
@@ -688,6 +880,10 @@ internal sealed class ModePopup : Form
         };
         modeTiles.Add((tile, mode));
         content.Controls.Add(tile);
+        if (insertionIndex is not null)
+        {
+            content.Controls.SetChildIndex(tile, insertionIndex.Value);
+        }
     }
 
     private Button CreateFooterButton(string text, EventHandler click)
@@ -719,9 +915,17 @@ internal sealed class ModePopup : Form
         }
 
         var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-        var maxClientHeight = Math.Max(520, workingArea.Height - 32);
-        ClientSize = new Size(PopupWidth, Math.Min(desiredClientHeight + Padding.Vertical, maxClientHeight));
-        content.AutoScroll = desiredClientHeight > ClientSize.Height;
+        var desiredHeight = desiredClientHeight + Padding.Vertical;
+        ClientSize = new Size(
+            PopupPlacement.FitWidth(
+                PopupWidth,
+                workingArea.Width,
+                LogicalToDeviceUnits(16)),
+            PopupPlacement.FitHeight(
+                desiredHeight,
+                workingArea.Height,
+                LogicalToDeviceUnits(32)));
+        content.AutoScroll = desiredHeight > ClientSize.Height;
         UpdateContentWidths();
     }
 
@@ -831,17 +1035,45 @@ internal sealed class ModeTile : Control
     public ModeTile(string text)
     {
         DoubleBuffered = true;
+        AccessibleName = text;
+        AccessibleRole = AccessibleRole.PushButton;
         Cursor = Cursors.Hand;
+        TabStop = true;
         Text = text;
         Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular);
         MouseEnter += (_, _) => { hovered = true; Invalidate(); };
         MouseLeave += (_, _) => { hovered = false; Invalidate(); };
+        GotFocus += (_, _) => Invalidate();
+        LostFocus += (_, _) => Invalidate();
     }
+
+    public bool Selected => selected;
+
+    protected override AccessibleObject CreateAccessibilityInstance() =>
+        new ModeTileAccessibleObject(this);
+
+    internal void Activate() => OnClick(EventArgs.Empty);
 
     public void SetSelected(bool value)
     {
         selected = value;
         Invalidate();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            Activate();
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnTextChanged(EventArgs e)
+    {
+        base.OnTextChanged(e);
+        AccessibleName = Text;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -883,6 +1115,25 @@ internal sealed class ModeTile : Control
                 Color.FromArgb(57, 211, 181),
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
+
+        if (Focused)
+        {
+            ControlPaint.DrawFocusRectangle(
+                e.Graphics,
+                new Rectangle(4, 4, Width - 8, Height - 8),
+                Color.FromArgb(180, 187, 200),
+                background);
+        }
+    }
+
+    private sealed class ModeTileAccessibleObject(ModeTile owner) : ControlAccessibleObject(owner)
+    {
+        public override AccessibleRole Role => AccessibleRole.PushButton;
+
+        public override AccessibleStates State =>
+            base.State | (owner.Selected ? AccessibleStates.Selected : AccessibleStates.None);
+
+        public override void DoDefaultAction() => owner.Activate();
     }
 
     private static GraphicsPath RoundedRect(Rectangle bounds, int radius)
@@ -1060,7 +1311,13 @@ internal static class ModeSwitcher
 
     public static void SetTurboOc(bool enabled)
     {
-        var state = ModeState.TryRead();
+        var read = ModeState.Read();
+        if (read.Error is not null)
+        {
+            throw new InvalidOperationException(read.Error.UserMessage);
+        }
+
+        var state = read.State;
         if (state is null || state.Value.OperatingMode != 2)
         {
             throw new InvalidOperationException("GPU OC 只能在狂暴模式下切换。");
@@ -1170,32 +1427,119 @@ internal static class ModeSwitcher
     private static void WaitForState(Func<ModeState, bool> predicate, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow.Add(timeout);
+        ModeStateError? lastError = null;
         while (DateTime.UtcNow < deadline)
         {
-            var state = ModeState.TryRead();
-            if (state is not null && predicate(state.Value))
+            var read = ModeState.Read();
+            if (read.State is not null && predicate(read.State.Value))
             {
                 return;
             }
+
+            lastError = read.Error;
             Thread.Sleep(100);
         }
+
+        if (lastError is not null)
+        {
+            throw new TimeoutException($"命令已发送，但{lastError.UserMessage}。");
+        }
+
         throw new TimeoutException("命令已发送，但模式状态没有在 5 秒内更新。");
     }
 }
 
 internal static class DiagnosticLog
 {
+    private const long MaxFileBytes = 2 * 1024 * 1024;
+    private const int MaxFileCount = 3;
     private static readonly object Sync = new();
     private static readonly string PathName = Path.Combine(AppContext.BaseDirectory, "ID6ModeTray.log");
+    private static string? lastMessage;
+    private static int suppressedCount;
 
     public static void Write(string message)
     {
         lock (Sync)
         {
-            File.AppendAllText(PathName, $"{DateTime.Now:O} {message}{Environment.NewLine}", Encoding.UTF8);
+            try
+            {
+                if (message == lastMessage)
+                {
+                    suppressedCount++;
+                    return;
+                }
+
+                if (suppressedCount > 0 && lastMessage is not null)
+                {
+                    WriteLine($"Previous message repeated {suppressedCount} times: {lastMessage}");
+                }
+
+                lastMessage = message;
+                suppressedCount = 0;
+                WriteLine(message);
+            }
+            catch
+            {
+                // Logging must never interrupt mode switching or terminate the tray.
+            }
+        }
+    }
+
+    private static void WriteLine(string message)
+    {
+        var line = $"{DateTime.Now:O} {message}{Environment.NewLine}";
+        RotateIfNeeded(Encoding.UTF8.GetByteCount(line));
+        File.AppendAllText(PathName, line, Encoding.UTF8);
+    }
+
+    private static void RotateIfNeeded(int incomingBytes)
+    {
+        if (!File.Exists(PathName) ||
+            new FileInfo(PathName).Length + incomingBytes <= MaxFileBytes)
+        {
+            return;
+        }
+
+        for (var index = MaxFileCount - 1; index >= 1; index--)
+        {
+            var source = index == 1 ? PathName : $"{PathName}.{index - 1}";
+            var destination = $"{PathName}.{index}";
+            if (!File.Exists(source))
+            {
+                continue;
+            }
+
+            if (File.Exists(destination))
+            {
+                File.Delete(destination);
+            }
+
+            File.Move(source, destination);
         }
     }
 }
+
+internal enum ModeStateErrorKind
+{
+    NotFound,
+    IO,
+    InvalidData,
+    Unknown
+}
+
+internal sealed record ModeStateError(ModeStateErrorKind Kind, string Detail)
+{
+    public string UserMessage => Kind switch
+    {
+        ModeStateErrorKind.NotFound => "未找到智控中心状态文件",
+        ModeStateErrorKind.IO => "智控中心状态文件暂时不可读",
+        ModeStateErrorKind.InvalidData => "智控中心状态数据异常",
+        _ => "读取智控中心状态失败"
+    };
+}
+
+internal readonly record struct ModeReadResult(ModeState? State, ModeStateError? Error);
 
 internal readonly record struct ModeState(
     int OperatingMode,
@@ -1206,34 +1550,180 @@ internal readonly record struct ModeState(
     int TurboGpuOcOffset,
     int FanBoostEnabled)
 {
-    public static ModeState? TryRead()
+    public static ModeReadResult Read()
     {
         try
         {
-            var json = JsonNode.Parse(File.ReadAllText(ControlCenterPaths.MainOption));
-            var operatingMode = json?["OperatingMode"]?.GetValue<int>() ?? -1;
-            var turboIndex = json?["TurboProfileIndex"]?.GetValue<int>() ?? 0;
-            var turboSilent = -1;
-            var turboExtreme = -1;
-            if (operatingMode == 2)
-            {
-                var profile = JsonNode.Parse(File.ReadAllText(ControlCenterPaths.TurboProfile(turboIndex)));
-                turboSilent = profile?["Silent"]?.GetValue<int>() ?? -1;
-                turboExtreme = profile?["Extreme"]?.GetValue<int>() ?? -1;
-            }
-            return new ModeState(
-                operatingMode,
-                json?["CustomProfileIndex"]?.GetValue<int>() ?? -1,
-                turboIndex,
-                turboSilent,
-                turboExtreme,
-                json?["TurboGPUOCOffset"]?.GetValue<int>() ?? 0,
-                json?["FanBoostEnable"]?.GetValue<int>() ?? 0);
+            return ReadFrom(ControlCenterPaths.MainOption, ControlCenterPaths.TurboProfile);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            return new ModeReadResult(null, CreateError(ex));
         }
+    }
+
+    internal static ModeReadResult ReadFrom(
+        string mainOptionPath,
+        Func<int, string> turboProfilePath,
+        int maxAttempts = 3)
+    {
+        maxAttempts = Math.Max(1, maxAttempts);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var json = ReadJson(mainOptionPath);
+                var operatingMode = json["OperatingMode"]?.GetValue<int>() ?? -1;
+                if (operatingMode is < 0 or > 3)
+                {
+                    throw new InvalidDataException("OperatingMode is missing or invalid.");
+                }
+
+                var turboIndex = json["TurboProfileIndex"]?.GetValue<int>() ?? 0;
+                var turboSilent = -1;
+                var turboExtreme = -1;
+                if (operatingMode == 2)
+                {
+                    var profile = ReadJson(turboProfilePath(turboIndex));
+                    turboSilent = profile["Silent"]?.GetValue<int>() ?? -1;
+                    turboExtreme = profile["Extreme"]?.GetValue<int>() ?? -1;
+                }
+
+                return new ModeReadResult(
+                    new ModeState(
+                        operatingMode,
+                        json["CustomProfileIndex"]?.GetValue<int>() ?? -1,
+                        turboIndex,
+                        turboSilent,
+                        turboExtreme,
+                        json["TurboGPUOCOffset"]?.GetValue<int>() ?? 0,
+                        json["FanBoostEnable"]?.GetValue<int>() ?? 0),
+                    null);
+            }
+            catch (Exception ex) when (attempt < maxAttempts && IsTransient(ex))
+            {
+                Thread.Sleep(50);
+            }
+            catch (Exception ex)
+            {
+                return new ModeReadResult(null, CreateError(ex));
+            }
+        }
+    }
+
+    public static ModeState? TryRead() => Read().State;
+
+    private static JsonNode ReadJson(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return JsonNode.Parse(reader.ReadToEnd())
+            ?? throw new InvalidDataException("The state file is empty.");
+    }
+
+    private static bool IsTransient(Exception exception) =>
+        exception is JsonException or InvalidDataException ||
+        exception is IOException and not FileNotFoundException and not DirectoryNotFoundException;
+
+    private static ModeStateError CreateError(Exception exception)
+    {
+        var kind = exception switch
+        {
+            FileNotFoundException or DirectoryNotFoundException => ModeStateErrorKind.NotFound,
+            UnauthorizedAccessException or IOException => ModeStateErrorKind.IO,
+            JsonException or InvalidDataException or FormatException or InvalidOperationException =>
+                ModeStateErrorKind.InvalidData,
+            _ => ModeStateErrorKind.Unknown
+        };
+        return new ModeStateError(kind, exception.Message);
+    }
+}
+
+internal sealed class ModeCatalog
+{
+    private readonly Func<string> fingerprintProvider;
+    private readonly Func<IReadOnlyList<ModeDefinition>> loader;
+    private string fingerprint;
+
+    public ModeCatalog()
+        : this(ComputeFingerprint, ModeDefinition.Load)
+    {
+    }
+
+    internal ModeCatalog(
+        Func<string> fingerprintProvider,
+        Func<IReadOnlyList<ModeDefinition>> loader)
+    {
+        this.fingerprintProvider = fingerprintProvider;
+        this.loader = loader;
+        Modes = loader();
+        try
+        {
+            fingerprint = fingerprintProvider();
+        }
+        catch (Exception ex)
+        {
+            fingerprint = string.Empty;
+            DiagnosticLog.Write($"Initial mode catalog fingerprint failed: {ex.Message}");
+        }
+    }
+
+    public IReadOnlyList<ModeDefinition> Modes { get; private set; }
+
+    public bool Refresh()
+    {
+        try
+        {
+            var before = fingerprintProvider();
+            if (before == fingerprint)
+            {
+                return false;
+            }
+
+            var updated = loader();
+            var after = fingerprintProvider();
+            Modes = updated;
+            fingerprint = before == after ? after : string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLog.Write($"Mode catalog refresh failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static string ComputeFingerprint()
+    {
+        var builder = new StringBuilder();
+        AppendFile(builder, Path.Combine(AppContext.BaseDirectory, "profiles.json"));
+        AppendFile(builder, ControlCenterProfileNames.SettingsPath);
+        foreach (var profile in ControlCenterPaths.CustomProfiles())
+        {
+            AppendFile(builder, profile.Path);
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendFile(StringBuilder builder, string path)
+    {
+        builder.Append(path).Append('|');
+        if (File.Exists(path))
+        {
+            var info = new FileInfo(path);
+            builder.Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks);
+        }
+        else
+        {
+            builder.Append("missing");
+        }
+
+        builder.AppendLine();
     }
 }
 
@@ -1245,12 +1735,20 @@ internal sealed record ModeDefinition(
     int? Silent = null,
     int? Extreme = null)
 {
-    public static IReadOnlyList<ModeDefinition> Load()
+    public static IReadOnlyList<ModeDefinition> Load() =>
+        Load(
+            Path.Combine(AppContext.BaseDirectory, "profiles.json"),
+            ControlCenterPaths.CustomProfiles(),
+            ControlCenterProfileNames.Load());
+
+    internal static IReadOnlyList<ModeDefinition> Load(
+        string configuredPath,
+        IEnumerable<(int Index, string Path)> customProfiles,
+        IReadOnlyDictionary<int, string> controlCenterAliases)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "profiles.json");
-        var configured = File.Exists(path)
+        var configured = File.Exists(configuredPath)
             ? JsonSerializer.Deserialize<List<ModeDefinition>>(
-                File.ReadAllText(path),
+                File.ReadAllText(configuredPath),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             : null;
         configured ??= Defaults.ToList();
@@ -1260,41 +1758,50 @@ internal sealed record ModeDefinition(
             .Where(mode => mode.OperatingMode == 3)
             .GroupBy(mode => mode.ProfileIndex)
             .ToDictionary(group => group.Key, group => group.First());
-        var controlCenterAliases = ControlCenterProfileNames.Load();
+        var discovered = new List<ModeDefinition>();
 
         try
         {
-            foreach (var profile in ControlCenterPaths.CustomProfiles())
+            foreach (var profile in customProfiles)
             {
-                var json = JsonNode.Parse(File.ReadAllText(profile.Path));
-                if (json?["Activated"]?.GetValue<bool>() != true)
+                try
                 {
-                    continue;
-                }
+                    var json = JsonNode.Parse(File.ReadAllText(profile.Path));
+                    if (json?["Activated"]?.GetValue<bool>() != true)
+                    {
+                        continue;
+                    }
 
-                customOverrides.TryGetValue(profile.Index, out var profileOverride);
-                var customizeName = json?["CustomizeName"]?.GetValue<string>()?.Trim();
-                var oemLabel = !string.IsNullOrWhiteSpace(customizeName) &&
-                               !int.TryParse(customizeName, out _)
-                    ? customizeName
-                    : null;
-                var alias = controlCenterAliases.GetValueOrDefault(profile.Index);
-                var label = !string.IsNullOrWhiteSpace(alias)
-                    ? $"Profile {profile.Index + 1} - {alias}"
-                    : profileOverride?.Label;
-                if (string.IsNullOrWhiteSpace(label))
+                    customOverrides.TryGetValue(profile.Index, out var profileOverride);
+                    var customizeName = json?["CustomizeName"]?.GetValue<string>()?.Trim();
+                    var oemLabel = !string.IsNullOrWhiteSpace(customizeName) &&
+                                   !int.TryParse(customizeName, out _)
+                        ? customizeName
+                        : null;
+                    var alias = controlCenterAliases.GetValueOrDefault(profile.Index);
+                    var label = !string.IsNullOrWhiteSpace(alias)
+                        ? $"Profile {profile.Index + 1} - {alias}"
+                        : profileOverride?.Label;
+                    if (string.IsNullOrWhiteSpace(label))
+                    {
+                        label = oemLabel is null
+                            ? $"Profile {profile.Index + 1}"
+                            : $"Profile {profile.Index + 1} - {oemLabel}";
+                    }
+
+                    discovered.Add(new ModeDefinition(
+                        label,
+                        "OPERATING_CUSTOM_MODE",
+                        3,
+                        profile.Index));
+                }
+                catch (Exception ex)
                 {
-                    label = oemLabel is null
-                        ? $"Profile {profile.Index + 1}"
-                        : $"Profile {profile.Index + 1} - {oemLabel}";
+                    DiagnosticLog.Write($"Custom profile skipped: {profile.Path}: {ex.Message}");
                 }
-
-                modes.Add(new ModeDefinition(
-                    label,
-                    "OPERATING_CUSTOM_MODE",
-                    3,
-                    profile.Index));
             }
+
+            modes.AddRange(discovered);
         }
         catch (Exception ex)
         {
@@ -1355,17 +1862,26 @@ internal static class ControlCenterProfileNames
     private static IReadOnlyDictionary<int, string> cachedAliases =
         new Dictionary<int, string>();
 
-    public static IReadOnlyDictionary<int, string> Load()
+    internal static string SettingsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Packages",
+        PackageFamilyName,
+        "Settings",
+        "settings.dat");
+
+    public static IReadOnlyDictionary<int, string> Load() => Load(SettingsPath);
+
+    internal static IReadOnlyDictionary<int, string> Load(string path)
     {
         var aliases = new Dictionary<int, string>();
+        IReadOnlyDictionary<int, string> Succeed()
+        {
+            cachedAliases = aliases;
+            return aliases;
+        }
+
         try
         {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Packages",
-                PackageFamilyName,
-                "Settings",
-                "settings.dat");
             using var stream = new FileStream(
                 path,
                 FileMode.Open,
@@ -1379,20 +1895,20 @@ internal static class ControlCenterProfileNames
             var markerIndex = hiveText.IndexOf(customMarker, StringComparison.Ordinal);
             if (markerIndex < 0)
             {
-                return aliases;
+                return Succeed();
             }
 
             var arrayStart = hiveText.LastIndexOf('[', markerIndex);
             var arrayEnd = hiveText.IndexOf(']', markerIndex);
             if (arrayStart < 0 || arrayEnd <= arrayStart)
             {
-                return aliases;
+                return Succeed();
             }
 
             var profiles = JsonNode.Parse(hiveText[arrayStart..(arrayEnd + 1)])?.AsArray();
             if (profiles is null)
             {
-                return aliases;
+                return Succeed();
             }
 
             foreach (var profile in profiles)
@@ -1415,10 +1931,7 @@ internal static class ControlCenterProfileNames
 
             DiagnosticLog.Write(
                 $"Loaded {aliases.Count} custom profile aliases from Control Center settings.");
-            if (aliases.Count > 0)
-            {
-                cachedAliases = aliases;
-            }
+            cachedAliases = aliases;
         }
         catch (Exception ex)
         {
@@ -1427,7 +1940,7 @@ internal static class ControlCenterProfileNames
             return cachedAliases;
         }
 
-        return aliases.Count > 0 ? aliases : cachedAliases;
+        return aliases;
     }
 }
 

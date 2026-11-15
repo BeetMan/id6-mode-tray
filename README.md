@@ -10,12 +10,14 @@ ID6 Mode Tray 是一个轻量的 Windows 托盘模式切换器，用来快速切
 
 - 托盘图标左键或右键打开模式面板
 - 切换办公、游戏、狂暴静谧、狂暴极限等标准模式
-- 自动发现已启用的自定义 Profile
+- 自动发现已启用的自定义 Profile，并在打开面板或刷新时检测变化
 - 在狂暴模式下切换 GPU OC +150 MHz
 - 一键开启或关闭强冷
 - 显示当前模式和操作结果提示
 - 可选设置开机自启动
 - 提供命令行入口，方便脚本或快捷方式调用
+- 适配四边任务栏、多显示器和高 DPI，长 Profile 列表可滚动
+- 支持 Tab 导航、Enter/空格切换以及 Esc 关闭面板
 
 ## 运行要求
 
@@ -57,7 +59,7 @@ https://www.machenike.com/driver/download/?id=344
 - 下半部分是自定义 Profile
 - 底部按钮可刷新状态、打开智控中心、切换开机启动或退出
 
-自定义 Profile 会从智控中心配置目录中的 `Mode4_Profile*.json` 自动发现，只显示 `Activated=true` 的槽位。如果 `profiles.json` 中存在相同 `profileIndex` 的条目，其 `label` 可作为显示名称兜底或覆盖。
+自定义 Profile 会从智控中心配置目录中的 `Mode4_Profile*.json` 自动发现，只显示 `Activated=true` 的槽位。如果 `profiles.json` 中存在相同 `profileIndex` 的条目，其 `label` 可作为显示名称兜底或覆盖。打开面板或点击“刷新”时会检测 Profile 与别名变化；单个损坏的 Profile 文件不会影响其他条目。
 
 ## 命令行
 
@@ -116,10 +118,18 @@ ID6ModeTray.exe --oc off
 
 ## 构建
 
-项目使用 .NET 8 WinForms：
+项目使用 .NET 10 WinForms：
 
 ```powershell
 dotnet build ModeTray\ModeTray.csproj -c Release
+```
+
+## 测试
+
+测试项目使用临时 Profile 和状态文件，不会修改原厂配置：
+
+```powershell
+dotnet run --project tests\ModeTray.Tests\ModeTray.Tests.csproj -c Release
 ```
 
 当前项目引用本地的 `ModeTray\lib\M2Mqtt.Net.dll`：
@@ -160,7 +170,7 @@ ModeTray\assets\id6-mode.ico
 ID6ModeTray.log
 ```
 
-日志用于记录启动、MQTT 连接、命令发送、状态等待和异常信息。日志文件属于运行产物，不应提交。
+日志用于记录启动、MQTT 连接、命令发送、状态等待和异常信息。连续重复日志会被压缩；单个日志最大 2 MiB，最多保留当前文件和两个轮转归档。日志文件属于运行产物，不应提交。
 
 ## 已知限制
 
