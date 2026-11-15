@@ -132,6 +132,22 @@ dotnet build ModeTray\ModeTray.csproj -c Release
 dotnet run --project tests\ModeTray.Tests\ModeTray.Tests.csproj -c Release
 ```
 
+也可以运行完整还原、测试和构建：
+
+```powershell
+ModeTray\scripts\build-and-test.ps1
+```
+
+### 干净发布包
+
+以下命令会先执行全部测试，再生成框架依赖发布包：
+
+```powershell
+ModeTray\scripts\publish-release.ps1
+```
+
+输出位于 `artifacts\ID6ModeTray`，并生成 `artifacts\ID6ModeTray.zip`、`release-manifest.json` 和 SHA-256 校验清单。脚本只清理 `artifacts` 下的同名发布产物，不会覆盖或重启当前运行目录中的 Tray。发布包包含本机验证所需的 `M2Mqtt.Net.dll`，仅供本机使用；该 DLL 不随 Git 仓库发布，也不要将包含它的发布包上传或二次分发。
+
 当前项目引用本地的 `ModeTray\lib\M2Mqtt.Net.dll`：
 
 ```xml

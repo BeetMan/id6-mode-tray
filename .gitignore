@@ -17,6 +17,16 @@
 !ModeTray/assets/screenshot.jpg
 !ModeTray/scripts/
 !ModeTray/scripts/generate-icon.ps1
+!ModeTray/UI/
+!ModeTray/UI/*.cs
+!ModeTray/Modes/
+!ModeTray/Modes/*.cs
+!ModeTray/Services/
+!ModeTray/Services/*.cs
+!ModeTray/Platform/
+!ModeTray/Platform/*.cs
+!ModeTray/scripts/build-and-test.ps1
+!ModeTray/scripts/publish-release.ps1
 !tests/
 !tests/ModeTray.Tests/
 !tests/ModeTray.Tests/ModeTray.Tests.csproj
@@ -28,6 +38,7 @@
 /backups/
 
 # Build outputs and logs.
+/artifacts/
 bin/
 obj/
 publish/
