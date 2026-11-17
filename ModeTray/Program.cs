@@ -10,6 +10,25 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
             DiagnosticLog.Write($"Unhandled process exception: {eventArgs.ExceptionObject}");
 
+        if (args.Any(arg =>
+            arg.Equals("--status", StringComparison.OrdinalIgnoreCase) ||
+            arg.Equals("--list", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                Environment.ExitCode = CommandLineInterface.Execute(args, CliOutput.WriteLine);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Write($"Command-line query failed: {ex}");
+                CliOutput.WriteLine(args.Any(arg => arg.Equals("--json", StringComparison.OrdinalIgnoreCase))
+                    ? CommandLineInterface.ExceptionJson(ex)
+                    : ex.Message);
+                Environment.ExitCode = 1;
+            }
+            return;
+        }
+
         if (args.Length == 2 && args[0].Equals("--fan-boost", StringComparison.OrdinalIgnoreCase))
         {
             try

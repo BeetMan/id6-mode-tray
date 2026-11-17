@@ -8,6 +8,10 @@ if (args.Length == 2 && args[0] == "--render-popup")
 {
     return RenderPopup(args[1]);
 }
+if (args.Length == 4 && args[0] == "--lock-worker")
+{
+    return RunLockWorker(args[1], args[2], args[3]);
+}
 
 var tests = new List<(string Name, Action Body)>
 {
@@ -28,7 +32,15 @@ var tests = new List<(string Name, Action Body)>
     ("Popup placement clamps negative and small monitors", PopupPlacementClampsNegativeAndSmallMonitors),
     ("Toast placement supports negative monitor coordinates", ToastPlacementSupportsNegativeMonitorCoordinates),
     ("Mode tile supports keyboard and accessibility", ModeTileSupportsKeyboardAndAccessibility),
-    ("Mode popup uses compact readable styling", ModePopupUsesCompactReadableStyling)
+    ("Mode popup uses compact readable styling", ModePopupUsesCompactReadableStyling),
+    ("CLI status emits active mode and JSON state", CliStatusEmitsActiveModeAndJsonState),
+    ("CLI list exposes executable command IDs", CliListExposesExecutableCommandIds),
+    ("CLI JSON errors have stable failure schema", CliJsonErrorsHaveStableFailureSchema),
+    ("Control lock serializes separate processes", ControlLockSerializesSeparateProcesses),
+    ("CLI exception output remains valid JSON", CliExceptionOutputRemainsValidJson),
+    ("CLI list IDs round-trip through switch parsing", CliListIdsRoundTripThroughSwitchParsing),
+    ("Control lock recovers from abandoned mutex", ControlLockRecoversFromAbandonedMutex),
+    ("Control lock times out and releases cleanly", ControlLockTimesOutAndReleasesCleanly)
 };
 var failures = 0;
 foreach (var test in tests)
@@ -546,6 +558,217 @@ static int RenderPopup(string outputPath)
     });
     return 0;
 }
+
+static void CliStatusEmitsActiveModeAndJsonState()
+{
+    var modes = TestModes();
+    var state = new ModeState(3, 1, 0, -1, -1, 150, 0);
+    var output = new List<string>();
+    var exitCode = CommandLineInterface.Execute(
+        new[] { "--status", "--json" },
+        output.Add,
+        modes,
+        new ModeReadResult(state, null));
+    using var json = System.Text.Json.JsonDocument.Parse(output.Single());
+    AssertEqual(0, exitCode);
+    AssertEqual(1, json.RootElement.GetProperty("schemaVersion").GetInt32());
+    AssertEqual("custom:2", json.RootElement.GetProperty("mode").GetString());
+    AssertEqual("Profile 2 - 静音办公", json.RootElement.GetProperty("label").GetString());
+    AssertEqual(150, json.RootElement.GetProperty("state").GetProperty("turboGpuOcOffset").GetInt32());
+    AssertFalse(json.RootElement.GetProperty("state").GetProperty("fanBoostEnabled").GetBoolean(), "Fan must be false.");
+
+    output.Clear();
+    exitCode = CommandLineInterface.Execute(new[] { "--status" }, output.Add, modes, new ModeReadResult(state, null));
+    AssertEqual(0, exitCode);
+    AssertTrue(output[0].Contains("Profile 2 - 静音办公"), "Human status must contain the active label.");
+}
+
+static void CliListExposesExecutableCommandIds()
+{
+    var output = new List<string>();
+    var exitCode = CommandLineInterface.Execute(
+        new[] { "--list", "--json" },
+        output.Add,
+        TestModes(),
+        new ModeReadResult(new ModeState(3, 1, 0, -1, -1, 150, 0), null));
+    using var json = System.Text.Json.JsonDocument.Parse(output.Single());
+    var modes = json.RootElement.GetProperty("modes").EnumerateArray().ToArray();
+    AssertEqual(0, exitCode);
+    AssertEqual(9, modes.Length);
+    AssertEqual("office", modes[0].GetProperty("id").GetString());
+    AssertEqual("turbo:silent", modes[2].GetProperty("id").GetString());
+    AssertEqual("custom:5", modes[8].GetProperty("id").GetString());
+    AssertTrue(modes[5].GetProperty("active").GetBoolean(), "Custom Profile 2 must be active.");
+}
+
+static void CliJsonErrorsHaveStableFailureSchema()
+{
+    var output = new List<string>();
+    var error = new ModeStateError(ModeStateErrorKind.IO, "locked");
+    var exitCode = CommandLineInterface.Execute(
+        new[] { "--json", "--status" },
+        output.Add,
+        TestModes(),
+        new ModeReadResult(null, error));
+    using var json = System.Text.Json.JsonDocument.Parse(output.Single());
+    AssertEqual(1, exitCode);
+    AssertFalse(json.RootElement.GetProperty("ok").GetBoolean(), "Status must report failure.");
+    AssertEqual("IO", json.RootElement.GetProperty("error").GetProperty("kind").GetString());
+    AssertEqual(error.UserMessage, json.RootElement.GetProperty("error").GetProperty("message").GetString());
+}
+
+static void ControlLockSerializesSeparateProcesses()
+{
+    var directory = CreateTestDirectory();
+    try
+    {
+        var events = Path.Combine(directory.FullName, "events.csv");
+        var gate = Path.Combine(directory.FullName, "start.gate");
+        var mutexName = "Local\\ID6ModeTray.Test." + Guid.NewGuid().ToString("N");
+        var executable = Environment.ProcessPath ?? throw new InvalidOperationException("No test executable path.");
+        var children = Enumerable.Range(0, 2).Select(_ =>
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = executable,
+                Arguments = $"--lock-worker \"{events}\" {mutexName} \"{gate}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }) ?? throw new InvalidOperationException("Unable to start lock worker.")).ToArray();
+        foreach (var child in children)
+        {
+            AssertTrue(WaitForFile($"{events}.ready.{child.Id}", 5000), "Lock worker did not reach start gate.");
+        }
+        File.WriteAllText(gate, "go");
+        foreach (var child in children)
+        {
+            AssertTrue(child.WaitForExit(10000), "Lock worker timed out.");
+            AssertEqual(0, child.ExitCode);
+            child.Dispose();
+        }
+        var intervals = File.ReadAllLines(events)
+            .Select(line => line.Split(','))
+            .GroupBy(parts => parts[0])
+            .Select(group => new
+            {
+                Start = long.Parse(group.Single(parts => parts[1] == "enter")[2]),
+                End = long.Parse(group.Single(parts => parts[1] == "exit")[2])
+            })
+            .OrderBy(interval => interval.Start)
+            .ToArray();
+        AssertEqual(2, intervals.Length);
+        AssertTrue(intervals[0].End <= intervals[1].Start, "Critical sections in separate processes overlapped.");
+    }
+    finally { directory.Delete(recursive: true); }
+}
+
+static void CliExceptionOutputRemainsValidJson()
+{
+    using var json = System.Text.Json.JsonDocument.Parse(
+        CommandLineInterface.ExceptionJson(new InvalidDataException("broken profile")));
+    AssertEqual(1, json.RootElement.GetProperty("schemaVersion").GetInt32());
+    AssertFalse(json.RootElement.GetProperty("ok").GetBoolean(), "Exception JSON must be unsuccessful.");
+    AssertEqual("Exception", json.RootElement.GetProperty("error").GetProperty("kind").GetString());
+    AssertEqual("broken profile", json.RootElement.GetProperty("error").GetProperty("message").GetString());
+}
+
+static void CliListIdsRoundTripThroughSwitchParsing()
+{
+    var modes = TestModes().Concat(new ModeDefinition[]
+    {
+        new("Unknown", "ACTION", 4, 0),
+        new("Invalid Turbo", "ACTION", 2, 0, 0, 0),
+        new("Duplicate Office", "ACTION", 0, 0)
+    }).ToArray();
+    var output = new List<string>();
+    var exitCode = CommandLineInterface.Execute(
+        new[] { "--list", "--json" },
+        output.Add,
+        modes,
+        new ModeReadResult(new ModeState(3, 1, 0, -1, -1, 150, 0), null));
+    using var json = System.Text.Json.JsonDocument.Parse(output.Single());
+    var listed = json.RootElement.GetProperty("modes").EnumerateArray().ToArray();
+    AssertEqual(0, exitCode);
+    AssertEqual(9, listed.Length);
+    foreach (var mode in listed)
+    {
+        var id = mode.GetProperty("id").GetString()!;
+        var parsed = ModeDefinition.Parse(id, TestModes());
+        AssertEqual(mode.GetProperty("label").GetString(), parsed.Label);
+    }
+}
+
+static void ControlLockRecoversFromAbandonedMutex()
+{
+    var name = "Local\\ID6ModeTray.Test.Abandoned." + Guid.NewGuid().ToString("N");
+    var thread = new Thread(() =>
+    {
+        var abandoned = new Mutex(false, name);
+        abandoned.WaitOne();
+    });
+    thread.Start();
+    thread.Join();
+    using var recovered = ControlOperationLock.Enter(name, TimeSpan.FromSeconds(1));
+}
+
+static void ControlLockTimesOutAndReleasesCleanly()
+{
+    var name = "Local\\ID6ModeTray.Test.Timeout." + Guid.NewGuid().ToString("N");
+    using (var held = ControlOperationLock.Enter(name))
+    {
+        Exception? contention = null;
+        var contender = new Thread(() =>
+        {
+            try
+            {
+                using var second = ControlOperationLock.Enter(name, TimeSpan.FromMilliseconds(100));
+            }
+            catch (Exception ex)
+            {
+                contention = ex;
+            }
+        });
+        contender.Start();
+        contender.Join();
+        AssertTrue(contention is TimeoutException, "A held lock must time out when requested from another thread.");
+    }
+    using var reacquired = ControlOperationLock.Enter(name, TimeSpan.FromSeconds(1));
+}
+
+static bool WaitForFile(string path, int timeoutMs)
+{
+    var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+    while (DateTime.UtcNow < deadline)
+    {
+        if (File.Exists(path)) { return true; }
+        Thread.Sleep(25);
+    }
+    return File.Exists(path);
+}
+
+static int RunLockWorker(string path, string mutexName, string gatePath)
+{
+    File.WriteAllText($"{path}.ready.{Environment.ProcessId}", "ready");
+    if (!WaitForFile(gatePath, 5000)) { throw new TimeoutException("Start gate timed out."); }
+    using var lease = ControlOperationLock.Enter(mutexName);
+    var processId = Environment.ProcessId;
+    File.AppendAllText(path, $"{processId},enter,{DateTime.UtcNow.Ticks}\n");
+    Thread.Sleep(400);
+    File.AppendAllText(path, $"{processId},exit,{DateTime.UtcNow.Ticks}\n");
+    return 0;
+}
+
+static IReadOnlyList<ModeDefinition> TestModes() =>
+[
+    new("办公模式", "OPERATING_OFFICE_MODE", 0, 0),
+    new("游戏模式", "OPERATING_GAMING_MODE", 1, 0),
+    new("狂暴 · 静技", "OPERATING_TURBO_MODE", 2, 0, 1, 0),
+    new("狂暴 · 极速", "OPERATING_TURBO_MODE", 2, 0, 0, 1),
+    new("Profile 1 - 静音均衡", "OPERATING_CUSTOM_MODE", 3, 0),
+    new("Profile 2 - 静音办公", "OPERATING_CUSTOM_MODE", 3, 1),
+    new("Profile 3 - 静音游戏", "OPERATING_CUSTOM_MODE", 3, 2),
+    new("Profile 4 - 测试", "OPERATING_CUSTOM_MODE", 3, 3),
+    new("Profile 5 - 你好", "OPERATING_CUSTOM_MODE", 3, 4)
+];
 
 static DirectoryInfo CreateTestDirectory() => Directory.CreateDirectory(Path.Combine(
     AppContext.BaseDirectory,

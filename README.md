@@ -86,6 +86,21 @@ ID6ModeTray.exe --oc off
 
 注意：`--oc on/off` 只在当前处于狂暴模式时可用。
 
+### 查询与脚本集成
+
+```powershell
+ID6ModeTray.exe --status
+ID6ModeTray.exe --list
+ID6ModeTray.exe --status --json
+ID6ModeTray.exe --list --json
+```
+
+`--status` 显示当前模式、GPU OC 偏移和强冷状态；`--list` 列出可直接传给 `--switch` 的模式 ID。两者都支持 `--json`，JSON 结构包含 `schemaVersion=1`，便于脚本解析。状态文件读取失败时返回非零退出码，并在 JSON 中提供 `error.kind` 和 `error.message`。
+
+模式切换、GPU OC 和强冷命令使用跨进程控制锁；UI 与 CLI 或多个 CLI 进程同时发起操作时，会串行执行而不是同时写入硬件控制命令。
+
+程序是 WinExe。脚本需要等待查询完成或读取退出码时，请使用输出重定向、管道捕获或显式等待（例如 `Start-Process -Wait -PassThru`），不要仅依赖控制台提示符的返回时间。
+
 ## 配置文件
 
 `profiles.json` 跟随程序复制到输出目录，用来定义默认显示项和命令映射。一个条目包含：

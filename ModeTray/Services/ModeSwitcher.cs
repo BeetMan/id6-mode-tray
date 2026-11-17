@@ -8,6 +8,7 @@ internal static class ModeSwitcher
 {
     public static void Switch(ModeDefinition mode)
     {
+        using var controlLock = ControlOperationLock.Enter();
         var client = new MqttClient(
             "127.0.0.1",
             13688,
@@ -67,6 +68,7 @@ internal static class ModeSwitcher
 
     public static void SetTurboOc(bool enabled)
     {
+        using var controlLock = ControlOperationLock.Enter();
         var read = ModeState.Read();
         if (read.Error is not null)
         {
@@ -120,6 +122,7 @@ internal static class ModeSwitcher
 
     public static void SetFanBoost(bool enabled)
     {
+        using var controlLock = ControlOperationLock.Enter();
         var client = new MqttClient(
             "127.0.0.1",
             13688,

@@ -11,6 +11,16 @@ internal sealed record ModeDefinition(
     int? Silent = null,
     int? Extreme = null)
 {
+    internal string? CommandId => OperatingMode switch
+    {
+        0 => "office",
+        1 => "gaming",
+        2 when Silent == 1 => "turbo:silent",
+        2 when Extreme == 1 => "turbo:extreme",
+        3 when ProfileIndex >= 0 => $"custom:{ProfileIndex + 1}",
+        _ => null
+    };
+
     public static IReadOnlyList<ModeDefinition> Load() =>
         Load(
             Path.Combine(AppContext.BaseDirectory, "profiles.json"),
@@ -96,10 +106,11 @@ internal sealed record ModeDefinition(
              (Silent is null || state.TurboSilent == Silent) &&
              (Extreme is null || state.TurboExtreme == Extreme)));
 
-    public static ModeDefinition Parse(string value)
+    public static ModeDefinition Parse(string value) => Parse(value, Load());
+
+    internal static ModeDefinition Parse(string value, IReadOnlyList<ModeDefinition> modes)
     {
         var parts = value.Split(':', 2);
-        var modes = Load();
         return value.ToLowerInvariant() switch
         {
             "office" => modes.First(mode => mode.OperatingMode == 0),
