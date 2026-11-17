@@ -65,14 +65,14 @@ internal sealed class ModePopup : Form
         var header = new Panel
         {
             BackColor = Color.Transparent,
-            Margin = new Padding(8, 4, 8, 18),
-            Padding = new Padding(66, 7, 8, 9),
-            Size = new Size(ContentWidth, 104)
+            Margin = new Padding(8, 4, 8, 12),
+            Padding = new Padding(66, 5, 8, 7),
+            Size = new Size(ContentWidth, 96)
         };
         header.Controls.Add(new PictureBox
         {
             Image = IconFactory.CreateBitmap(44),
-            Location = new Point(2, 22),
+            Location = new Point(2, 18),
             Size = new Size(48, 48),
             SizeMode = PictureBoxSizeMode.Zoom
         });
@@ -84,8 +84,8 @@ internal sealed class ModePopup : Form
             Dock = DockStyle.Fill,
             RowCount = 2,
         };
-        headerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
-        headerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        headerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
+        headerText.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
         header.Controls.Add(headerText);
 
         var titleLabel = new Label
@@ -124,9 +124,9 @@ internal sealed class ModePopup : Form
             FlatStyle = FlatStyle.Flat,
             ForeColor = Color.FromArgb(160, 167, 181),
             Font = new Font(UiFontName, 9.5F, FontStyle.Bold),
-            Margin = new Padding(8, 8, 8, 6),
+            Margin = new Padding(8, 6, 8, 5),
             Padding = new Padding(0, 2, 0, 4),
-            Size = new Size(ContentWidth, 54),
+            Size = new Size(ContentWidth, 52),
             Text = "GPU OC +150 MHz  ·  仅狂暴模式"
         };
         turboOcButton.FlatAppearance.BorderColor = Color.FromArgb(55, 60, 71);
@@ -147,9 +147,9 @@ internal sealed class ModePopup : Form
             FlatStyle = FlatStyle.Flat,
             ForeColor = Color.FromArgb(224, 227, 234),
             Font = new Font(UiFontName, 9.5F, FontStyle.Bold),
-            Margin = new Padding(8, 2, 8, 6),
+            Margin = new Padding(8, 2, 8, 5),
             Padding = new Padding(0, 2, 0, 4),
-            Size = new Size(ContentWidth, 54),
+            Size = new Size(ContentWidth, 52),
             Text = "一键强冷  ·  已关闭"
         };
         fanBoostButton.FlatAppearance.BorderColor = Color.FromArgb(55, 60, 71);
@@ -173,9 +173,9 @@ internal sealed class ModePopup : Form
         {
             BackColor = Color.Transparent,
             ColumnCount = 3,
-            Margin = new Padding(8, 18, 8, 2),
+            Margin = new Padding(8, 12, 8, 2),
             RowCount = 1,
-            Size = new Size(ContentWidth, 62)
+            Size = new Size(ContentWidth, 58)
         };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24F));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 41F));
@@ -200,9 +200,9 @@ internal sealed class ModePopup : Form
             FlatStyle = FlatStyle.Flat,
             ForeColor = Color.FromArgb(150, 158, 172),
             Font = new Font(UiFontName, 10F),
-            Margin = new Padding(8, 8, 8, 4),
+            Margin = new Padding(8, 6, 8, 4),
             Padding = new Padding(0, 1, 0, 4),
-            Size = new Size(ContentWidth, 50),
+            Size = new Size(ContentWidth, 46),
             Text = "\u9000\u51fa"
         };
         exitButton.FlatAppearance.BorderSize = 0;
@@ -351,7 +351,7 @@ internal sealed class ModePopup : Form
             : Color.FromArgb(27, 30, 36);
         turboOcButton.ForeColor = turboModeActive
             ? turboOcEnabled ? Color.FromArgb(57, 211, 181) : Color.FromArgb(224, 227, 234)
-            : Color.FromArgb(105, 112, 125);
+            : Color.FromArgb(145, 153, 168);
         turboOcButton.FlatAppearance.BorderColor = turboOcEnabled
             ? Color.FromArgb(57, 211, 181)
             : Color.FromArgb(55, 60, 71);
@@ -366,8 +366,8 @@ internal sealed class ModePopup : Form
         {
             ForeColor = Color.FromArgb(130, 138, 153),
             Font = new Font(UiFontName, 8.5F, FontStyle.Bold),
-            Margin = new Padding(14, 12, 8, 8),
-            Size = new Size(SectionLabelWidth, 30),
+            Margin = new Padding(14, 10, 8, 6),
+            Size = new Size(SectionLabelWidth, 28),
             Text = text.ToUpperInvariant()
         };
         label.Tag = "section";
@@ -396,8 +396,8 @@ internal sealed class ModePopup : Form
         var tile = new ModeTile(mode.Label)
         {
             Enabled = !busy,
-            Margin = new Padding(8, 4, 8, 4),
-            Size = new Size(ContentWidth, 64)
+            Margin = new Padding(8, 3, 8, 3),
+            Size = new Size(ContentWidth, 60)
         };
         tile.Click += (_, _) =>
         {

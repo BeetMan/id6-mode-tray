@@ -69,6 +69,11 @@ internal sealed class ModeTile : Control
             using var border = new Pen(Color.FromArgb(57, 211, 181), 1.5F);
             e.Graphics.DrawPath(border, path);
         }
+        else if (hovered)
+        {
+            using var border = new Pen(Color.FromArgb(68, 78, 94), 1.25F);
+            e.Graphics.DrawPath(border, path);
+        }
 
         var dotRect = new Rectangle(17, Height / 2 - 5, 10, 10);
         using var dot = new SolidBrush(selected ? Color.FromArgb(57, 211, 181) : Color.FromArgb(82, 89, 103));

@@ -27,7 +27,8 @@ var tests = new List<(string Name, Action Body)>
     ("Popup placement supports all taskbar edges", PopupPlacementSupportsAllTaskbarEdges),
     ("Popup placement clamps negative and small monitors", PopupPlacementClampsNegativeAndSmallMonitors),
     ("Toast placement supports negative monitor coordinates", ToastPlacementSupportsNegativeMonitorCoordinates),
-    ("Mode tile supports keyboard and accessibility", ModeTileSupportsKeyboardAndAccessibility)
+    ("Mode tile supports keyboard and accessibility", ModeTileSupportsKeyboardAndAccessibility),
+    ("Mode popup uses compact readable styling", ModePopupUsesCompactReadableStyling)
 };
 var failures = 0;
 foreach (var test in tests)
@@ -336,6 +337,42 @@ static void RunInSta(Action action)
     thread.Start();
     thread.Join();
     if (failure is not null) { throw failure; }
+}
+
+static void ModePopupUsesCompactReadableStyling()
+{
+    RunInSta(() =>
+    {
+        using var popup = new ModePopup(
+            new ModeDefinition[] { new("Office", "ACTION", 0, 0) },
+            _ => { }, _ => { }, _ => { }, () => { }, () => { });
+        popup.UpdateState(new ModeState(3, 1, 0, -1, -1, 150, 0));
+        var tilesField = typeof(ModePopup).GetField(
+            "modeTiles",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var tiles = (List<(ModeTile Tile, ModeDefinition Mode)>)tilesField.GetValue(popup)!;
+        AssertTrue(tiles.All(entry => entry.Tile.Height == 60), "Mode tiles should use compact 60px rows.");
+        var ocButton = (Button)typeof(ModePopup).GetField(
+            "turboOcButton",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(popup)!;
+        var contrast = ContrastRatio(ocButton.ForeColor, ocButton.BackColor);
+        AssertTrue(contrast >= 4.5, $"Disabled OC text contrast {contrast:F2} must be at least 4.5:1.");
+    });
+}
+
+static double ContrastRatio(Color foreground, Color background)
+{
+    static double Channel(byte value)
+    {
+        var channel = value / 255.0;
+        return channel <= 0.03928 ? channel / 12.92 : Math.Pow((channel + 0.055) / 1.055, 2.4);
+    }
+    static double Luminance(Color color) =>
+        0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+    var first = Luminance(foreground);
+    var second = Luminance(background);
+    return (Math.Max(first, second) + 0.05) / (Math.Min(first, second) + 0.05);
 }
 
 static void PopupPlacementSupportsAllTaskbarEdges()
